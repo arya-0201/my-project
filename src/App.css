@@ -44,3 +44,16 @@
 
 .drawer.hidden { display: none; }
 .drawer.visible { display: block; }
+
+:root {
+  color-scheme: light;    /* 브라우저가 다크모드 스타일을 적용하지 않도록 함 */
+}
+body {
+  background-color: #fff;
+  color: #000;
+}
+
+button {
+  background-color: #DCE8F9;
+  color: rgb(25, 98, 255);
+}

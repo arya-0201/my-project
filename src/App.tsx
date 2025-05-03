@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import "./App.css";
 import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
 
@@ -118,7 +119,13 @@ const [_isDetailModalOpen, _setIsDetailModalOpen] = useState(false);
 
   const [toast, setToast] = useState<string | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>(() => {
+    const json = localStorage.getItem("myRecipes");
+    return json ? JSON.parse(json) as Recipe[] : [];
+  });
+
+// recipes 변경 시 로컬스토리지에 저장
+useEffect(() => {localStorage.setItem("myRecipes", JSON.stringify(recipes));}, [recipes]);
   const [isIngredientModalOpen, setIsIngredientModalOpen] = useState(false);
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
   const [_expiryMode, _setExpiryMode] = useState("+3일");
@@ -575,8 +582,8 @@ const handleEditRecipe = (r: Recipe) => {
       padding: "8px 16px",
       borderRadius: "8px",
       border: "none",
-      backgroundColor: activeTab === "list" ? "#fff" : "#444",
-      color: activeTab === "list" ? "#000" : "#ccc",
+      backgroundColor: activeTab === "list" ? "#71ACFF" : "#DCE8F9",
+      color: activeTab === "list" ? "#fff" : "#1A79FF",
       fontWeight: "bold",
       cursor: "pointer"
     }}
@@ -589,8 +596,8 @@ const handleEditRecipe = (r: Recipe) => {
       padding: "8px 16px",
       borderRadius: "8px",
       border: "none",
-      backgroundColor: activeTab === "db" ? "#fff" : "#444",
-      color: activeTab === "db" ? "#000" : "#ccc",
+      backgroundColor: activeTab === "db" ? "#71ACFF" : "#DCE8F9",
+      color: activeTab === "db" ? "#fff" : "#1A79FF",
       fontWeight: "bold",
       cursor: "pointer"
     }}
@@ -607,8 +614,8 @@ const handleEditRecipe = (r: Recipe) => {
     padding: "8px 16px",
     borderRadius: "8px",
     border: "none",
-    backgroundColor: activeTab === "fridge" ? "#fff" : "#444",
-    color: activeTab === "fridge" ? "#000" : "#ccc",
+    backgroundColor: activeTab === "fridge" ? "#71ACFF" : "#DCE8F9",
+    color: activeTab === "fridge" ? "#fff" : "#1A79FF",
     fontWeight: "bold",
     cursor: "pointer"
   }}
@@ -653,7 +660,7 @@ const handleEditRecipe = (r: Recipe) => {
     }}
   >
     <div style={{
-      background: "#2c2c2c", color: "white",
+      background: "#fff",
       padding: 20, borderRadius: 8, width: 400
     }}>
       <h2>단건 식재료 추가</h2>
@@ -801,8 +808,6 @@ setIngredientSuggestions([]);
       style={{
         marginTop: "10px",
         padding: "6px 10px",
-        background: "#444",
-        color: "white",
         border: "none",
         borderRadius: "6px",
         cursor: "pointer"
@@ -1007,8 +1012,7 @@ setIngredientSuggestions([]);
           zIndex: 1000
         }}>
           <div style={{
-            background: "#2c2c2c",
-            color: "white",
+            background: "#fff",
             padding: 20,
             borderRadius: 8,
             width: 600
@@ -1085,8 +1089,8 @@ setIngredientSuggestions([]);
         right: 0,
         maxHeight: 160,
         overflowY: "auto",
-        background: "#2c2c2c",
-        border: "1px solid #555",
+        background: "#fff",
+        border: "1px solid #999",
         borderRadius: "0 0 4px 4px",
         margin: 0,
         padding: 0,
@@ -1118,8 +1122,7 @@ setIngredientSuggestions([]);
             {recipeForm.ingredients.length === 0 ? (
   <div style={{
     padding: "24px",
-    backgroundColor: "#444",
-    color: "#fff",
+    backgroundColor: "#F7F7F7",
     textAlign: "center",
     borderRadius: "4px",
     marginTop: "12px"
@@ -1287,6 +1290,7 @@ setIsRecipeModalOpen(false)
       width: "50%",
       height: "100%",
       background: "#fff",
+      color: "#000",
       boxShadow: "-4px 0 8px rgba(0,0,0,0.2)",
       padding: 20,
       overflowY: "auto",
@@ -1307,6 +1311,8 @@ setIsRecipeModalOpen(false)
     >
       ×
     </button>
+    {/* 레시피 이름 타이틀 */}
+    <h2 style={{ color: "#222", marginBottom: "16px", fontSize: "1.5rem" }}>{selectedRecipe.name} 레시피</h2>
 
     {selectedRecipe.image && (
       <img
@@ -1350,7 +1356,7 @@ setIsRecipeModalOpen(false)
     position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
     backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center"
   }}>
-    <div style={{ background: "#2c2c2c", color: "white", padding: 20, borderRadius: 8, width: 500 }}>
+    <div style={{ background: "#fff", padding: 20, borderRadius: 8, width: 500 }}>
       <h2>냉장고에 재료 넣기</h2>
       <form onSubmit={handleAddIngredient}>
 
