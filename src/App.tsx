@@ -505,8 +505,10 @@ const handleEditRecipe = (r: Recipe) => {
           carbs,
           protein,
           fat,
-          
+          avgShelfLife,
+          pieceWeight
         } = row;
+        
       
         if (!name || !weight) continue;
       
@@ -517,8 +519,8 @@ const handleEditRecipe = (r: Recipe) => {
           carbs,
           protein,
           fat,
-          avgShelfLife: ingredientForm.avgShelfLife ?? 0,
-          pieceWeight:  ingredientForm.pieceWeight  ?? 0,
+          avgShelfLife: avgShelfLife  ?? 0,
+          pieceWeight:  pieceWeight   ?? 0,
         };
       }
       
