@@ -2,6 +2,9 @@ import * as XLSX from "xlsx";
 import "./App.css";
 import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
+import { db } from "./firebase";
+import { collection, onSnapshot, setDoc, doc } from "firebase/firestore";
+
 
 interface Ingredient {
   id: string;
@@ -114,18 +117,30 @@ const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
 const [_isDetailModalOpen, _setIsDetailModalOpen] = useState(false);
 
 
-
+const [recipes, setRecipes] = useState<Recipe[]>([]);
 
 
   const [toast, setToast] = useState<string | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [recipes, setRecipes] = useState<Recipe[]>(() => {
-    const json = localStorage.getItem("myRecipes");
-    return json ? JSON.parse(json) as Recipe[] : [];
-  });
+ 
+  useEffect(() => {
+    const col = collection(db, "recipes");
+    const unsubscribe = onSnapshot(col, snapshot => {
+      const arr: Recipe[] = [];
+      snapshot.forEach(doc => {
+        arr.push({ id: doc.id, ...doc.data() } as Recipe);
+      });
+      setRecipes(arr);
+    });
+    return () => unsubscribe();
+  }, []);
+  useEffect(() => {
+    recipes.forEach(r => {
+      setDoc(doc(db, "recipes", r.id), r);
+    });
+  }, [recipes]);
+    
 
-// recipes 변경 시 로컬스토리지에 저장
-useEffect(() => {localStorage.setItem("myRecipes", JSON.stringify(recipes));}, [recipes]);
   const [isIngredientModalOpen, setIsIngredientModalOpen] = useState(false);
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
   const [_expiryMode, _setExpiryMode] = useState("+3일");
@@ -168,13 +183,6 @@ useEffect(() => {localStorage.setItem("myRecipes", JSON.stringify(recipes));}, [
   
   
 
-  useEffect(() => {
-    const saved = localStorage.getItem("ingredientDB");
-    if (saved) {
-      setIngredientDB(JSON.parse(saved));
-    }
-  }, []);
-  
 
 
   const [ingredientForm, setIngredientForm] = useState<Omit<Ingredient, "id">>({
