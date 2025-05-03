@@ -102,45 +102,17 @@ interface FridgeItem {
   expirationDate: Date;
   weight: number;
 }
-const [fridgeItems, setFridgeItems] = useState<FridgeItem[]>([]);
+const [_fridgeItems, _setFridgeItems] = useState<FridgeItem[]>([]);
 
 // 편집 모드를 구분할 ID 상태
 const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
 
 
 
-// 프리저 탭—냉장고 아이템 삭제
-const handleDeleteFridgeItem = (id: string) => {
-  if (!window.confirm("정말 이 재료를 삭제할까요?")) return;
-  setFridgeItems(prev => prev.filter(item => item.id !== id));
-};
-
-// 프리저 탭—냉장고 아이템 수정 모달 열기
-const handleEditFridgeItem = (id: string) => {
-  const target = fridgeItems.find(item => item.id === id);
-  if (!target) return;
-
-  setIngredientForm({
-    name:           target.name,
-    addedDate:      target.addedDate,
-    expirationDate: target.expirationDate,
-    weight:         target.weight,
-    calories:       ingredientDB[target.name]?.calories    ?? 0,
-    carbs:          ingredientDB[target.name]?.carbs       ?? 0,
-    protein:        ingredientDB[target.name]?.protein     ?? 0,
-    fat:            ingredientDB[target.name]?.fat         ?? 0,
-    avgShelfLife:   ingredientDB[target.name]?.avgShelfLife ?? 0,
-    pieceWeight:    ingredientDB[target.name]?.pieceWeight  ?? 0
-  });
-
-  setIngredientSearch(target.name);
-  setEditingFridgeId(id);
-  setIsIngredientModalOpen(true);
-}
-
 // 상세보기 모달 열림 여부, 선택된 레시피 저장
-const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-const [detailRecipe, setDetailRecipe] = useState<Recipe | null>(null);
+const [_isDetailModalOpen, _setIsDetailModalOpen] = useState(false);
+
+
 
 
 
@@ -149,11 +121,10 @@ const [detailRecipe, setDetailRecipe] = useState<Recipe | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [isIngredientModalOpen, setIsIngredientModalOpen] = useState(false);
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
-  const [expiryMode, setExpiryMode] = useState("+3일");
+  const [_expiryMode, _setExpiryMode] = useState("+3일");
   const [ingredientDB, setIngredientDB] = useState<{
     [name: string]: Omit<Ingredient, "id" | "addedDate" | "expirationDate"> & { avgShelfLife?: number }
   }>({});  
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"list" | "db" | "fridge">("list");
   const handleSampleDownload = () => {
     const sampleData = [
@@ -237,13 +208,6 @@ const [detailRecipe, setDetailRecipe] = useState<Recipe | null>(null);
   const handleAddToDB = (e: React.FormEvent) => {
     e.preventDefault();
   
-    // ingredientForm에 입력된 값 그대로 DB에 추가
-    const { name, weight, calories, carbs, protein, fat, avgShelfLife, pieceWeight } = ingredientForm;
-  
-    setIngredientDB(prev => ({
-      ...prev,
-      [name]: { name, weight, calories, carbs, protein, fat, avgShelfLife, pieceWeight }
-    }));
   
     // 모달 닫기 및 폼 초기화
     setIsDBAddModalOpen(false);
@@ -458,7 +422,7 @@ const handleEditRecipe = (r: Recipe) => {
     
     
     if (editingFridgeId) {
-      setFridgeItems(prev =>
+      _setFridgeItems(prev =>
         prev.map(item =>
           item.id === editingFridgeId
             ? {
@@ -485,10 +449,10 @@ const handleEditRecipe = (r: Recipe) => {
       avgShelfLife: 0,
       pieceWeight: 0
     });
-    setExpiryMode("+3일");
+    _setExpiryMode("+3일");
     setIsIngredientModalOpen(false);
     
-    setFridgeItems(prev => [
+    _setFridgeItems(prev => [
       ...prev,
       {
         id: crypto.randomUUID(),
@@ -541,8 +505,7 @@ const handleEditRecipe = (r: Recipe) => {
           carbs,
           protein,
           fat,
-          avgShelfLife,
-          pieceWeight
+          
         } = row;
       
         if (!name || !weight) continue;
@@ -1536,8 +1499,8 @@ setIsRecipeModalOpen(false)
       avgShelfLife: 0,
       pieceWeight: 0
     });
-    setSuggestions([]);
-    setExpiryMode("+3일");
+    setIngredientSuggestions([]);
+    _setExpiryMode("+3일");
   }}
 >
   취소
