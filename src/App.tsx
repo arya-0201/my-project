@@ -636,30 +636,24 @@ const handleEditRecipe = (r: Recipe) => {
     
   };
   
-
   const handleAddIngredient = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+  
+    // 1) 최종 addedDate 기준으로 만료일 계산
+    const expDate = new Date(ingredientForm.addedDate);
+    expDate.setDate(expDate.getDate() + ingredientForm.avgShelfLife);
+  
+    // 2) expirationDate를 덮어써서 저장
     await addDoc(collection(db, "fridgeItems"), {
-      ...ingredientForm
+      ...ingredientForm,
+      expirationDate: expDate
     });
+  
+    // 3) 모달 닫고 폼 초기화 (기존 로직 그대로)
     setIsIngredientModalOpen(false);
     setIngredientForm(initialIngredientForm);
   };
- 
-
-
-
-
   
-  
-  
-
-  const thStyle = {
-    border: "1px solid #444",
-    padding: "8px",
-    background: "#222",
-    fontWeight: "bold",
-  };
   
   const tdStyle = {
     border: "1px solid #444",
@@ -1042,34 +1036,29 @@ setIngredientSuggestions([]);
   <div style={{ padding: 20 }}>
     <h2 style={{ marginTop: 40 }}>🥦 마이냉장고 🥦</h2>
     <button onClick={() => {setIsIngredientModalOpen(true);setIngredientSearch("");}}>+ 냉장고에 재료 넣기</button>
-    <table
-      style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        marginTop: 16,
-      }}
-    >
-      <thead>
-        <tr>
-          <th style={thStyle}>이름</th>
-          <th style={thStyle}>무게 (g)</th>
-          <th style={thStyle}>추가일</th>
-          <th style={thStyle}>유통기한</th>
-          <th style={thStyle}>액션</th>
-        </tr>
-      </thead>
-      <tbody>
-      {fridgeItems.map(i => (
-  <tr key={i.id}>
-    <td>{i.name}</td>
-    <td>{i.weight}</td>
-    <td>{format(i.addedDate,      "yyyy-MM-dd")}</td>
-    <td>{format(i.expirationDate, "yyyy-MM-dd")}</td>
-    <td><button onClick={() => deleteDoc(doc(db,"fridgeItems",i.id))}>삭제</button></td>
-  </tr>
-))}
-      </tbody>
-    </table>
+    <div className="cards-container">
+  {fridgeItems.map(item => {
+    const isExpired = new Date(item.expirationDate) < new Date();
+    return (
+      <div key={item.id} className="card">
+        <span className={`badge ${isExpired ? 'expired' : 'ok'}`}>
+          {isExpired ? '유통기한 지났어요' : '아직 널널해요'}
+        </span>
+        <h3>{item.name}</h3>
+        <p>
+          {format(item.addedDate, 'yy.MM.dd')} 등록 {' | '}
+          {format(item.expirationDate, 'yy.MM.dd')}까지
+        </p>
+        <button
+          onClick={() => deleteDoc(doc(db, 'fridgeItems', item.id))}
+        >
+          삭제
+        </button>
+      </div>
+    );
+  })}
+</div>
+
   </div>
 )}
 
@@ -1471,22 +1460,27 @@ setIsRecipeModalOpen(false)
           <li
             key={name}
             onClick={() => {
-              setIngredientForm(f => ({
-                ...f,
-                name,
-                weight:     info.weight,
-                calories:   info.calories,
-                carbs:      info.carbs,
-                protein:    info.protein,
-                fat:         info.fat,
-                avgShelfLife: info.avgShelfLife ?? 0,
-                pieceWeight:  info.pieceWeight ?? 0,
-                expirationDate: (() => {
-                  const exp = new Date(f.addedDate);
-                  exp.setDate(exp.getDate() + (info.avgShelfLife ?? 0));
-                  return exp;
-                })()
-              }));
+              setIngredientForm(f => {
+                // 1) 기존 폼 복제 + DB값 덮어쓰기
+                const updated = {
+                  ...f,
+                  name,
+                  weight:       info.weight,
+                  calories:     info.calories,
+                  carbs:        info.carbs,
+                  protein:      info.protein,
+                  fat:          info.fat,
+                  avgShelfLife: info.avgShelfLife ?? 0,
+                  pieceWeight:  info.pieceWeight  ?? 0,
+                };
+                // 2) 등록일(updated.addedDate) + 평균유통기한
+                const exp = new Date(updated.addedDate);
+                exp.setDate(exp.getDate() + Number(updated.avgShelfLife));
+                updated.expirationDate = exp;
+                // 3) 리턴
+                return updated;
+              });              
+              
               setIngredientSearch(name);
               setIngredientSuggestions([]);
             }}
