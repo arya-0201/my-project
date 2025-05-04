@@ -3,7 +3,7 @@ import "./App.css";
 import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { db } from "./firebase";
-import { collection, addDoc, updateDoc, doc, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, onSnapshot, writeBatch } from "firebase/firestore";
 
 
 
@@ -318,11 +318,22 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     }
   };
  
-  const handleAddToDB = (e: React.FormEvent) => {
+  const handleAddToDB = async (e: React.FormEvent) => {
     e.preventDefault();
   
+    // 1) Firestore에 저장
+    await addDoc(collection(db, "ingredients"), {
+      name:         ingredientForm.name,
+      weight:       ingredientForm.weight,
+      calories:     ingredientForm.calories,
+      carbs:        ingredientForm.carbs,
+      protein:      ingredientForm.protein,
+      fat:          ingredientForm.fat,
+      avgShelfLife: ingredientForm.avgShelfLife ?? 0,
+      pieceWeight:  ingredientForm.pieceWeight ?? 0,
+    });
   
-    // 모달 닫기 및 폼 초기화
+    // 2) 모달 닫기 및 폼 초기화
     setIsDBAddModalOpen(false);
     setIngredientForm({
       name: "",
@@ -339,6 +350,7 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     setIngredientSearch("");
     setIngredientSuggestions([]);
   };
+  
   
 
 
@@ -661,67 +673,54 @@ const handleEditRecipe = (r: Recipe) => {
       
   };
 
-  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
   
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const data = evt.target?.result;
-      if (!data) return;
+    const data = await new Promise<string>((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => reader.result ? res(reader.result as string) : rej();
+      reader.readAsBinaryString(file);
+    });
   
-      const workbook = XLSX.read(data, { type: "binary" });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
+    const workbook = XLSX.read(data, { type: "binary" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = XLSX.utils.sheet_to_json<{ name: string; weight: number; calories: number; carbs: number; protein: number; fat: number; avgShelfLife?: number; pieceWeight?: number }>(sheet, { defval: "" });
   
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as {
-        name: string;
-        weight: number;
-        calories: number;
-        carbs: number;
-        protein: number;
-        fat: number;
-        avgShelfLife?: number;
-        pieceWeight?: number;
-      }[];
-      
-      const newDB: typeof ingredientDB = {};
-      
-      for (const row of jsonData) {
-        const {
-          name,
-          weight,
-          calories,
-          carbs,
-          protein,
-          fat,
-          avgShelfLife,
-          pieceWeight
-        } = row;
-        
-      
-        if (!name || !weight) continue;
-      
-        newDB[name] = {
-          weight,
-          calories,
-          carbs,
-          protein,
-          fat,
-          avgShelfLife: avgShelfLife  ?? 0,
-          pieceWeight:  pieceWeight   ?? 0,
-        };
-      }
-      
-      
+    // Firestore 저장
+    const col = collection(db, "ingredients");
+    const batch = writeBatch(db);
+    jsonData.forEach(row => {
+      if (!row.name || !row.weight) return;
+      const docRef = doc(col);  // 자동 ID
+      batch.set(docRef, {
+        name: row.name,
+        weight: row.weight,
+        calories: row.calories,
+        carbs: row.carbs,
+        protein: row.protein,
+        fat: row.fat,
+        avgShelfLife: row.avgShelfLife ?? 0,
+        pieceWeight: row.pieceWeight ?? 0,
+      });
+    });
+    await batch.commit();
   
-      const merged = { ...ingredientDB, ...newDB };
-      setIngredientDB(merged);
-      
-    };
-  
-    reader.readAsBinaryString(file);
+    // (선택) 로컬 상태에도 반영
+    setIngredientDB(prev => ({ ...prev, ...jsonData.reduce((acc, r) => {
+      acc[r.name] = {
+        weight: r.weight,
+        calories: r.calories,
+        carbs: r.carbs,
+        protein: r.protein,
+        fat: r.fat,
+        avgShelfLife: r.avgShelfLife ?? 0,
+        pieceWeight: r.pieceWeight ?? 0,
+      };
+      return acc;
+    }, {} as typeof ingredientDB) }));
   };
+  
   
   
 
