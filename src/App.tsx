@@ -3,7 +3,7 @@ import "./App.css";
 import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { db } from "./firebase";
-import { collection, addDoc, updateDoc, doc, onSnapshot, writeBatch } from "firebase/firestore";
+import { collection, updateDoc, doc, onSnapshot, writeBatch, addDoc, deleteDoc, Timestamp, getDocs, } from "firebase/firestore";
 
 
 
@@ -15,11 +15,32 @@ interface Ingredient {
   carbs: number;
   protein: number;
   fat: number;
-  addedDate: Date;
+  addedDate:      Date;
   expirationDate: Date;
   avgShelfLife: number;   
   pieceWeight?: number;   
 }
+
+interface FridgeItem {
+  id: string;
+  name: string;
+  weight: number;
+  addedDate: Date;
+  expirationDate: Date;
+}
+
+const initialIngredientForm: Omit<Ingredient, "id"> = {
+  name: "",
+  weight: 0,
+  calories: 0,
+  carbs: 0,
+  protein: 0,
+  fat: 0,
+  addedDate: new Date(),
+  expirationDate: new Date(),
+  avgShelfLife: 0,
+  pieceWeight: 0,
+};
 
 interface RecipeIngredient {
   name: string;
@@ -49,7 +70,60 @@ interface Recipe {
 
 
 function App() {
-  // 복사용
+
+  
+    // ─── App() 컴포넌트 안, useState 선언들 아래 ───
+    const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+  
+      // 1) 엑셀 읽어서 jsonData 생성 (기존 코드 유지)
+      const dataStr = await new Promise<string>((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () =>
+          reader.result ? res(reader.result as string) : rej("읽기 실패");
+        reader.readAsBinaryString(file);
+      });
+      const wb = XLSX.read(dataStr, { type: "binary" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  
+      // ───── A) 업로드 전에 기존 ingredients 컬렉션 비우기 ─────
+      const existing = await getDocs(collection(db, "ingredients"));
+      const deleteBatch = writeBatch(db);
+      existing.docs.forEach(docSnap =>
+        deleteBatch.delete(doc(db, "ingredients", docSnap.id))
+      );
+      await deleteBatch.commit();
+      // ───────────────────────────────────────────────────────────
+  
+      // 2) Firestore에 새 데이터 배치 쓰기 (기존 코드 유지)
+      const colRef = collection(db, "ingredients");
+      const batch  = writeBatch(db);
+      jsonData.forEach((row: any) => {
+        if (!row.name || !row.weight) return;
+        const docRef = doc(colRef);
+        batch.set(docRef, {
+          name:          row.name,
+          weight:        Number(row.weight),
+          calories:      Number(row.calories),
+          carbs:         Number(row.carbs),
+          protein:       Number(row.protein),
+          fat:            Number(row.fat),
+          avgShelfLife:  Number(row.avgShelfLife ?? 0),
+          pieceWeight:   Number(row.pieceWeight ?? 0),
+          addedDate:     new Date(),
+          expirationDate: row.avgShelfLife
+            ? new Date(Date.now() + Number(row.avgShelfLife) * 86400000)
+            : new Date(),
+        });
+      });
+      await batch.commit();
+    };
+    // ────────────────────────────────────────────────────────────
+  
+
+
 const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
 
 // App.tsx 맨 위쪽, 컴포넌트 함수 안에
@@ -73,33 +147,9 @@ const [ingredientSearch, setIngredientSearch] = useState<string>("");
 const [ingredientSuggestions, setIngredientSuggestions] = useState<string[]>([]);
 const [isDBAddModalOpen, setIsDBAddModalOpen] = useState<boolean>(false);
 const [isDBEditing, setIsDBEditing] = useState<boolean>(false);
-// DB 탭—식재료 삭제
-const handleDeleteIngredientDB = (name: string) => {
-  setIngredientDB(prev => {
-    const newDB = { ...prev };
-    delete newDB[name];
-    return newDB;
-  });
-};
 
-// DB 탭—식재료 편집: 단건 추가 모달 오픈 및 폼에 값 채우기
-const handleEditIngredientDB = (name: string) => {
-  const info = ingredientDB[name]!;
-  setIngredientForm({
-    name,
-    weight:       info.weight,
-    calories:     info.calories,
-    carbs:        info.carbs,
-    protein:      info.protein,
-    fat:           info.fat,
-    addedDate:    new Date(),  // 필요에 따라 수정
-    expirationDate: new Date(Date.now() + (info.avgShelfLife ?? 0) * 24*60*60*1000),
-    avgShelfLife: info.avgShelfLife ?? 0,
-    pieceWeight:  info.pieceWeight ?? 0
-  });
-  setIsDBEditing(true);
-  setIsDBAddModalOpen(true);
-};
+
+
 const [recipeUnitTypes, setRecipeUnitTypes] = useState<("g" | "count")[]>([]);
 const [recipeQuantities, setRecipeQuantities] = useState<number[]>([]);
 const [recipeSearchTerm, setRecipeSearchTerm] = useState<string>("");
@@ -107,15 +157,6 @@ const [recipeSuggestions, setRecipeSuggestions] = useState<string[]>([]);
 
 
 
-
-interface FridgeItem {
-  id: string;
-  name: string;
-  addedDate: Date;
-  expirationDate: Date;
-  weight: number;
-}
-const [_fridgeItems, _setFridgeItems] = useState<FridgeItem[]>([]);
 
 // 편집 모드를 구분할 ID 상태
 const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
@@ -130,7 +171,7 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   const [toast, setToast] = useState<string | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-
+  const [fridgeItems, setFridgeItems] = useState<FridgeItem[]>([]);
   
 
   
@@ -138,78 +179,88 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
   useEffect(() => {
     const col = collection(db, "ingredients");
     const unsubscribe = onSnapshot(col, snapshot => {
-      const items = snapshot.docs.map(doc => {
-        const data = doc.data() as {
-          name: string;
-          weight: number;
-          calories: number;
-          carbs: number;
-          protein: number;
-          fat: number;
-          avgShelfLife?: number;
-          pieceWeight?: number;
+      const items: Ingredient[] = snapshot.docs.map(d => {
+        // Firestore에서 받아오는 데이터를 Timestamp 필드로 간주
+        const data = d.data() as Omit<Ingredient, "id" | "addedDate" | "expirationDate"> & {
+          addedDate?:      Timestamp;
+          expirationDate?: Timestamp;
         };
-        return { id: doc.id, ...data };
+        return {
+          id:             d.id,
+          name:           data.name,
+          weight:         data.weight,
+          calories:       data.calories,
+          carbs:          data.carbs,
+          protein:        data.protein,
+          fat:             data.fat,
+          avgShelfLife:   data.avgShelfLife,
+          pieceWeight:    data.pieceWeight,
+          // undefined 체크 후 toDate() 호출 (없으면 현재 시각으로 대체)
+          addedDate:      data.addedDate
+                            ? data.addedDate.toDate()
+                            : new Date(),
+          expirationDate: data.expirationDate
+                            ? data.expirationDate.toDate()
+                            : new Date(),
+        };
       });
-      
-  
-      const mapByName = items.reduce((acc, {
-        name,
-        weight,
-        calories,
-        carbs,
-        protein,
-        fat,
-        avgShelfLife,
-        pieceWeight
-      }) => {
-        if (!name) return acc;
-        acc[name] = { weight, calories, carbs, protein, fat, avgShelfLife, pieceWeight };
-        return acc;
-      }, {} as Record<string, {
-        weight: number;
-        calories: number;
-        carbs: number;
-        protein: number;
-        fat: number;
-        avgShelfLife?: number;
-        pieceWeight?: number;
-      }>);
-  
-      setIngredientDB(mapByName);
+      setIngredients(items);
     });
-  
     return () => unsubscribe();
   }, []);
+
+  // 1) Firestore 'ingredients' 컬렉션 구독 useEffect 끝난 직후에 추가
+useEffect(() => {
+  // 검색어가 비어 있으면 suggestions 초기화
+  if (!ingredientSearch) {
+    setIngredientSuggestions([]);
+    return;
+  }
+  if (ingredients.some(i => i.name === ingredientSearch)) {
+    setIngredientSuggestions([]);
+    return;
+  }
+  // ingredients 배열에서 name만 뽑아 필터링
+  const matches = ingredients
+    .map(i => i.name)
+    .filter(name =>
+      name.toLowerCase().includes(ingredientSearch.toLowerCase())
+    );
+  setIngredientSuggestions(matches);
+}, [ingredientSearch, ingredients]);
+
+  
+  useEffect(() => {
+    const col = collection(db, "fridgeItems");
+    const unsub = onSnapshot(col, snap => {
+      const items = snap.docs.map(d => {
+        const data = d.data() as Omit<FridgeItem,"id"> & {
+          addedDate:      Timestamp;
+          expirationDate: Timestamp;
+        };
+        return {
+          id:             d.id,
+          name:           data.name,
+          weight:         data.weight,
+          addedDate:      data.addedDate.toDate(),
+          expirationDate: data.expirationDate.toDate(),
+        };
+      });
+      setFridgeItems(items);
+    });
+    return () => unsub();
+  }, []);
+  
   
   useEffect(() => {
     const colRec = collection(db, "recipes");
     const unsubRec = onSnapshot(colRec, snapshot => {
-      const recs: Recipe[] = snapshot.docs.map(doc => {
-        const data = doc.data() as Omit<Recipe, "total" | "id">;
-
-        // 영양성분 총합 계산
-        const total = data.ingredients.reduce((acc, i) => {
-          
-          return {
-            weight:   acc.weight   + i.weight,
-            calories: acc.calories + (i.calories * i.weight) / 100,
-            carbs:    acc.carbs    + (i.carbs    * i.weight) / 100,
-            protein:  acc.protein  + (i.protein  * i.weight) / 100,
-            fat:      acc.fat      + (i.fat      * i.weight) / 100,
-          };
-        }, { weight: 0, calories: 0, carbs: 0, protein: 0, fat: 0 });
-      
+      const recs = snapshot.docs.map(doc => {
+        const data = doc.data() as Omit<Recipe,"id"|"total">;
         return {
           id: doc.id,
           ...data,
-          total: {
-            weight:   Math.round(total.weight),
-            calories: Math.round(total.calories),
-            carbs:    Math.round(total.carbs),
-            protein:  Math.round(total.protein),
-            fat:      Math.round(total.fat),
-          },
+          total: calculateRecipeTotalFromData(data.ingredients),
         };
       });
       setRecipes(recs);
@@ -218,13 +269,14 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
   }, []);
   
 
+  const calculateRecipeTotalFromData = (ings: RecipeIngredient[]) =>
+    calculateRecipeTotal(ings);
     
 
   const [isIngredientModalOpen, setIsIngredientModalOpen] = useState(false);
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
   const [_expiryMode, _setExpiryMode] = useState("+3일");
-  const [ingredientDB, setIngredientDB] = useState<{
-    [name: string]: { weight: number; calories: number; carbs: number; protein: number; fat: number; avgShelfLife?: number; pieceWeight?: number } }>({});
+
   const [activeTab, setActiveTab] = useState<"list" | "db" | "fridge">("list");
   const handleSampleDownload = () => {
     const sampleData = [
@@ -245,42 +297,37 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     XLSX.writeFile(wb, "sample_ingredients.xlsx");
   };
   
-  const [editingFridgeId, setEditingFridgeId] = useState<string | null>(null);
 
 
 
-  const handleDelete = (id: string) => {
-    setIngredients(ingredients.filter((i) => i.id !== id));
-  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("이 재료를 영구 삭제할까요?")) return;
+    await deleteDoc(doc(db, "ingredients", id));
+    };
   
-  const handleEdit = (item: Ingredient) => {
-    setIngredientForm(item);
-    setIsIngredientModalOpen(true);
-  };
 
-  useEffect(() => {
-    const names = Object.keys(ingredientDB);
-    const filtered = names.filter(name =>
+
+  // ↓ ingredientDB 대신, 실제 Firestore 구독 상태인 `ingredients` 배열을 필터링합니다.
+useEffect(() => {
+  if (!ingredientSearch) {
+    setIngredientSuggestions([]);
+    return;
+  }
+
+  const matches = ingredients
+    .map(i => i.name)
+    .filter(name =>
       name.toLowerCase().includes(ingredientSearch.toLowerCase())
     );
-    setIngredientSuggestions(filtered);
-  }, [ingredientDB, ingredientSearch]);
+  setIngredientSuggestions(matches);
+}, [ingredientSearch, ingredients]);
+
   
 
 
 
-  const [ingredientForm, setIngredientForm] = useState<Omit<Ingredient, "id">>({
-    name: "",
-  weight: 0,
-  calories: 0,
-  carbs: 0,
-  protein: 0,
-  fat: 0,
-  addedDate: new Date(),
-  expirationDate: new Date(),
-  avgShelfLife: 0,    
-  pieceWeight: 0     
-  });
+  const [ingredientForm, setIngredientForm] = useState<Omit<Ingredient, "id">>(initialIngredientForm);
 
   const [recipeForm, setRecipeForm] = useState({
     name: "",
@@ -295,7 +342,10 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   const handleAddIngredientToRecipe = (name: string) => {
     if (!recipeForm.ingredients.find(i => i.name === name)) {
-      const { weight: defaultWeight, calories, carbs, protein, fat } = ingredientDB[name];
+      const base = ingredients.find(i => i.name === name);
+if (!base) return;
+const { weight: defaultWeight, calories, carbs, protein, fat } = base;
+
 
       // ② setRecipeForm 에 반드시 모든 필드를 채운 객체를 넣어준다
       setRecipeForm(prev => ({
@@ -318,7 +368,7 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     }
   };
  
-  const handleAddToDB = async (e: React.FormEvent) => {
+  const handleAddToDB = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
   
     // 1) Firestore에 저장
@@ -351,8 +401,7 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     setIngredientSuggestions([]);
   };
   
-  
-
+ 
 
   const updateIngredientWeight = (index: number, weight: number) => {
     const updated = [...recipeForm.ingredients];
@@ -360,10 +409,11 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     setRecipeForm({ ...recipeForm, ingredients: updated });
   };
 
-  const calculateRecipeTotal = () => {
+  const calculateRecipeTotal = (ings?: RecipeIngredient[]) => {
     let weight = 0, calories = 0, carbs = 0, protein = 0, fat = 0;
-    for (const item of recipeForm.ingredients) {
-      const base = ingredients.find(i => i.name === item.name) || ingredientDB[item.name];
+    const list = ings ?? recipeForm.ingredients;
+    for (const item of list) {
+      const base = ingredients.find(i => i.name === item.name);
       if (!base) continue;
   
       const ratio = item.weight / base.weight;
@@ -383,24 +433,28 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
   };
   
 // 레시피 삭제
-const handleDeleteRecipe = (id: string) => {
-  if (!window.confirm("정말 이 레시피를 삭제할까요?")) return;
-  setRecipes(prev => prev.filter(r => r.id !== id));
+const handleDeleteRecipe = async (id: string) => {
+  if (!confirm("정말 삭제할까요?")) return;
+  await deleteDoc(doc(db, "recipes", id));
 };
 
   // + handleRecipeSubmit 함수 정의 시작
-const handleRecipeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-
-  const payload = {
-    name:        recipeForm.name,
-    description: recipeForm.description,
-    image:       recipeForm.image,
-    youtube:     recipeForm.youtube,
-    instagram:   recipeForm.instagram,
-    ingredients: recipeForm.ingredients,
-    total:       calculateRecipeTotal(),  // ← 객체 반환!
-  };
+  const handleRecipeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const payload = {
+      name: recipeForm.name,
+      description: recipeForm.description,
+      image: recipeForm.image,
+      youtube: recipeForm.youtube,
+      instagram: recipeForm.instagram,
+      ingredients: recipeForm.ingredients,
+      total: calculateRecipeTotal(),
+    };
+    await addDoc(collection(db, "recipes"), payload);
+    setIsRecipeModalOpen(false);
+    setRecipeForm({ name:"", description:"", image:"", youtube:"", instagram:"", ingredients:[] });
+  
+  
   
 
   try {
@@ -455,7 +509,7 @@ const handleEditRecipe = (r: Recipe) => {
     youtube:     r.youtube || "",
     instagram:   r.instagram || "",
     ingredients: r.ingredients.map(i => {
-      const dbItem = ingredientDB[i.name] || { calories: 0, carbs: 0, protein: 0, fat: 0 };
+      const dbItem = ingredients.find(item => item.name === i.name) || { calories: 0, carbs: 0, protein: 0, fat: 0 };
       return {
         name: i.name,
         weight: i.weight,
@@ -474,6 +528,8 @@ const handleEditRecipe = (r: Recipe) => {
 };
 
 
+
+
   const saveRecipe = () => {
     // 수정 모드라면 기존 배열 업데이트
   if (editingRecipeId) {
@@ -489,7 +545,7 @@ const handleEditRecipe = (r: Recipe) => {
               instagram:   recipeForm.instagram,
               ingredients: recipeForm.ingredients.map(item => {
                 const base =
-                  ingredients.find(i => i.name === item.name) || ingredientDB[item.name]!;
+                ingredients.find(i => i.name === item.name)!;
                 const ratio = item.weight / base.weight;
                 return {
                   name:     item.name,
@@ -522,8 +578,7 @@ const handleEditRecipe = (r: Recipe) => {
 
       const fullWithNulls = recipeForm.ingredients.map(item => {
         const base =
-          ingredients.find(i => i.name === item.name) ||
-          ingredientDB[item.name]
+        ingredients.find(i => i.name === item.name)!;
         if (!base) return null
         const ratio = item.weight / base.weight
         return {
@@ -582,144 +637,19 @@ const handleEditRecipe = (r: Recipe) => {
   };
   
 
-  const handleAddIngredient = (e: React.FormEvent) => {
+  const handleAddIngredient = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (
-      ingredientForm.name.trim() === "" ||
-      !ingredientForm.weight ||
-      !ingredientForm.calories ||
-      !ingredientForm.carbs ||
-      !ingredientForm.protein
-    ) {
-      alert("⚠️ 모든 항목을 입력해주세요");
-      return;
-    }
-
-    const newItem: Ingredient = {
-      id: crypto.randomUUID(),
-      ...ingredientForm,
-    };
-
-    setIngredients([...ingredients, newItem]);
-    saveToDB(ingredientForm.name, {
-      name:         ingredientForm.name,
-      weight:       ingredientForm.weight,
-      calories:     ingredientForm.calories,
-      carbs:        ingredientForm.carbs,
-      protein:      ingredientForm.protein,
-      fat:          ingredientForm.fat,
-      avgShelfLife: ingredientForm.avgShelfLife ?? 0,
-      pieceWeight:  ingredientForm.pieceWeight  ?? 0,
+    await addDoc(collection(db, "fridgeItems"), {
+      ...ingredientForm
     });
-
-    
-    
-    if (editingFridgeId) {
-      _setFridgeItems(prev =>
-        prev.map(item =>
-          item.id === editingFridgeId
-            ? {
-                ...item,
-                name:           ingredientForm.name,
-                addedDate:      ingredientForm.addedDate,
-                expirationDate: ingredientForm.expirationDate,
-                weight:         ingredientForm.weight
-              }
-            : item
-        )
-      );
-      setEditingFridgeId(null);
-    }
-    setIngredientForm({
-      name: "",
-      addedDate: new Date(),
-      expirationDate: new Date(),
-      weight: 0,
-      calories: 0,
-      carbs: 0,
-      protein: 0,
-      fat: 0,
-      avgShelfLife: 0,
-      pieceWeight: 0
-    });
-    _setExpiryMode("+3일");
     setIsIngredientModalOpen(false);
-    
-    _setFridgeItems(prev => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        name:           ingredientForm.name,
-        addedDate:      ingredientForm.addedDate,
-        expirationDate: ingredientForm.expirationDate,
-        weight:         ingredientForm.weight
-      }
-    ]);
-    
-    
+    setIngredientForm(initialIngredientForm);
   };
-  const saveToDB = (_name: string, _data: Omit<Ingredient, "id" | "addedDate" | "expirationDate"> & Partial<Pick<Ingredient, "avgShelfLife" | "pieceWeight">>) => {
-    
-    addDoc(collection(db, "ingredients"), {
-      name:         ingredientForm.name,
-      weight:       ingredientForm.weight,
-      calories:     ingredientForm.calories,
-      carbs:        ingredientForm.carbs,
-      protein:      ingredientForm.protein,
-      fat:          ingredientForm.fat,
-      avgShelfLife: ingredientForm.avgShelfLife ?? 0,
-      pieceWeight:  ingredientForm.pieceWeight  ?? 0,
-      });
-      
-  };
+ 
 
-  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-  
-    const data = await new Promise<string>((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = () => reader.result ? res(reader.result as string) : rej();
-      reader.readAsBinaryString(file);
-    });
-  
-    const workbook = XLSX.read(data, { type: "binary" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json<{ name: string; weight: number; calories: number; carbs: number; protein: number; fat: number; avgShelfLife?: number; pieceWeight?: number }>(sheet, { defval: "" });
-  
-    // Firestore 저장
-    const col = collection(db, "ingredients");
-    const batch = writeBatch(db);
-    jsonData.forEach(row => {
-      if (!row.name || !row.weight) return;
-      const docRef = doc(col);  // 자동 ID
-      batch.set(docRef, {
-        name: row.name,
-        weight: row.weight,
-        calories: row.calories,
-        carbs: row.carbs,
-        protein: row.protein,
-        fat: row.fat,
-        avgShelfLife: row.avgShelfLife ?? 0,
-        pieceWeight: row.pieceWeight ?? 0,
-      });
-    });
-    await batch.commit();
-  
-    // (선택) 로컬 상태에도 반영
-    setIngredientDB(prev => ({ ...prev, ...jsonData.reduce((acc, r) => {
-      acc[r.name] = {
-        weight: r.weight,
-        calories: r.calories,
-        carbs: r.carbs,
-        protein: r.protein,
-        fat: r.fat,
-        avgShelfLife: r.avgShelfLife ?? 0,
-        pieceWeight: r.pieceWeight ?? 0,
-      };
-      return acc;
-    }, {} as typeof ingredientDB) }));
-  };
+
+
+
   
   
   
@@ -1010,34 +940,21 @@ setIngredientSuggestions([]);
     </tr>
   </thead>
   <tbody>
-    {Object.entries(ingredientDB).map(([name, info]) => (
-      <tr key={name}>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{name}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.weight}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.calories}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.carbs}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.protein}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.fat}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.avgShelfLife}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>{info.pieceWeight}</td>
-        <td style={{ border: "1px solid #555", padding: "8px" }}>
-          <button type="button" onClick={() => handleEditIngredientDB(name)} style={{ marginRight: 8 }}>
-            수정
-          </button>
-          <button
-  type="button"
-  onClick={() => {
-    if (window.confirm("정말 삭제할까요?")) {
-      handleDeleteIngredientDB(name);
-    }
-  }}
->
-  삭제
-</button>
-
-        </td>
-      </tr>
-    ))}
+  {ingredients.map(i => (
+    <tr key={i.id}>
+      <td style={tdStyle}>{i.name}</td>
+      <td style={tdStyle}>{i.weight}</td>
+      <td style={tdStyle}>{i.calories}</td>
+      <td style={tdStyle}>{i.carbs}</td>
+      <td style={tdStyle}>{i.protein}</td>
+      <td style={tdStyle}>{i.fat}</td>
+      <td style={tdStyle}>{i.avgShelfLife}</td>
+      <td style={tdStyle}>{i.pieceWeight}</td>
+      <td style={tdStyle}>
+        <button onClick={() => handleDelete(i.id)}>삭제</button>
+      </td>    
+    </tr>
+   ))}
   </tbody>
 </table>
 
@@ -1125,53 +1042,32 @@ setIngredientSuggestions([]);
   <div style={{ padding: 20 }}>
     <h2 style={{ marginTop: 40 }}>🥦 마이냉장고 🥦</h2>
     <button onClick={() => {setIsIngredientModalOpen(true);setIngredientSearch("");}}>+ 냉장고에 재료 넣기</button>
-
-    {/* 식재료 테이블 */}
-    <table style={{ width: "100%", borderCollapse: "collapse", color: "white", marginTop: "16px" }}>
+    <table
+      style={{
+        width: "100%",
+        borderCollapse: "collapse",
+        marginTop: 16,
+      }}
+    >
       <thead>
         <tr>
-          <th style={thStyle}>식재료명</th>
-          <th style={thStyle}>등록일</th>
+          <th style={thStyle}>이름</th>
+          <th style={thStyle}>무게 (g)</th>
+          <th style={thStyle}>추가일</th>
           <th style={thStyle}>유통기한</th>
-          <th style={thStyle}>수정</th>
-          <th style={thStyle}>삭제</th>
+          <th style={thStyle}>액션</th>
         </tr>
       </thead>
       <tbody>
-        {ingredients.map((i) => (
-          <tr key={i.id}>
-            <td style={tdStyle}>{i.name}</td>
-            <td style={tdStyle}>{format(i.addedDate, "yy.MM.dd")}</td>
-            <td style={tdStyle}>
-              {format(i.expirationDate, "yy.MM.dd")}
-              {(() => {
-                const today = new Date();
-                const diff = Math.ceil((i.expirationDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                if (diff >= 0 && diff <= 3) {
-                  return (
-                    <span style={{
-                      backgroundColor: "orange",
-                      color: "white",
-                      padding: "2px 6px",
-                      borderRadius: "4px",
-                      fontSize: "0.75rem",
-                      marginLeft: "6px"
-                    }}>
-                      3일이내
-                    </span>
-                  );
-                }
-                return null;
-              })()}
-            </td>
-            <td style={tdStyle}>
-              <button onClick={() => handleEdit(i)}>수정</button>
-            </td>
-            <td style={tdStyle}>
-              <button onClick={() => handleDelete(i.id)}>삭제</button>
-            </td>
-          </tr>
-        ))}
+      {fridgeItems.map(i => (
+  <tr key={i.id}>
+    <td>{i.name}</td>
+    <td>{i.weight}</td>
+    <td>{format(i.addedDate,      "yyyy-MM-dd")}</td>
+    <td>{format(i.expirationDate, "yyyy-MM-dd")}</td>
+    <td><button onClick={() => deleteDoc(doc(db,"fridgeItems",i.id))}>삭제</button></td>
+  </tr>
+))}
       </tbody>
     </table>
   </div>
@@ -1253,8 +1149,11 @@ setIngredientSuggestions([]);
       const term = e.target.value;
       setRecipeSearchTerm(term);
       setRecipeSuggestions(
-        Object.keys(ingredientDB)
-          .filter(name => name.toLowerCase().includes(term.toLowerCase()))
+        ingredients
+          .map(i => i.name)
+          .filter(name =>
+            name.toLowerCase().includes(term.toLowerCase())
+          )
       );
     }}
     placeholder="예) 양파, 두부…"
@@ -1322,7 +1221,7 @@ setIngredientSuggestions([]);
 
     <tbody>
       {recipeForm.ingredients.map((item, idx) => {
-        const base = ingredients.find(i => i.name === item.name) || ingredientDB[item.name];
+        const base = ingredients.find(i => i.name === item.name);
         if (!base) return null;
         const ratio = item.weight / base.weight;
         return (
@@ -1348,9 +1247,8 @@ setIngredientSuggestions([]);
             arr[idx] = q;
             return arr;
           });
-          const base =
-            ingredientDB[item.name]?.pieceWeight ??
-            ingredientDB[item.name].weight;
+          const picked = ingredients.find(i => i.name === item.name)!;
+          const base   = picked.pieceWeight ?? picked.weight;
           updateIngredientWeight(idx, q * base);
         }}
         style={{ flex: 1 }}
@@ -1376,7 +1274,7 @@ setIngredientSuggestions([]);
         <input
           type="radio"
           checked={recipeUnitTypes[idx] === "count"}
-          disabled={!ingredientDB[item.name]?.pieceWeight}
+          disabled={!ingredients.find(i => i.name === item.name)?.pieceWeight}
           onChange={() => {
             setRecipeUnitTypes(prev => {
               const arr = [...prev];
@@ -1388,10 +1286,9 @@ setIngredientSuggestions([]);
               arr[idx] = 1;
               return arr;
             });
-            const base =
-              ingredientDB[item.name]?.pieceWeight ??
-              ingredientDB[item.name].weight;
-            updateIngredientWeight(idx, base);
+            const picked = ingredients.find(i => i.name === item.name)!;
+            const baseWeight = picked.pieceWeight ?? picked.weight;
+            updateIngredientWeight(idx, baseWeight);
           }}
         />
         개수
@@ -1533,7 +1430,7 @@ setIsRecipeModalOpen(false)
       position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
       backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center"
     }}>
-      <div style={{ background: "#2c2c2c", color: "white", padding: 20, borderRadius: 8, width: 500 }}>
+      <div style={{ background: "#fff", padding: 20, borderRadius: 8, width: 500 }}>
         <h2>냉장고에 재료 넣기</h2>
         <form onSubmit={handleAddIngredient}>
 
@@ -1547,49 +1444,58 @@ setIsRecipeModalOpen(false)
                 const term = e.target.value;
                 setIngredientSearch(term);
                 setIngredientSuggestions(
-                  Object.keys(ingredientDB).filter(name =>
-                    name.toLowerCase().includes(term.toLowerCase())
-                  )
+                  ingredients
+                    .map(i => i.name)
+                    .filter(name =>
+                      name.toLowerCase().includes(term.toLowerCase())
+                    )
                 );
+                
               }}
               placeholder="예) 양파, 두부…"
               style={{ padding: "8px", borderRadius: 4, border: "1px solid #555" }}
             />
-            {ingredientSuggestions.length > 0 && (
+            {ingredientSuggestions.length > 0
+  && !(ingredientSuggestions.length === 1
+       && ingredientSuggestions[0] === ingredientSearch)
+  && (
               <ul style={{
                 position: "absolute", top: "100%", left: 0, right: 0, maxHeight: 150, overflowY: "auto",
-                background: "#2c2c2c", border: "1px solid #555", borderRadius: "0 0 4px 4px",
+                background: "#fff", border: "1px solid #555", borderRadius: "0 0 4px 4px",
                 margin: 0, padding: 0, listStyle: "none", zIndex: 10
               }}>
-                {ingredientSuggestions.map(name => (
-                  <li
-                    key={name}
-                    onClick={() => {
-                      const info = ingredientDB[name]!;
-                      setIngredientForm(f => ({
-                        ...f,
-                        name,
-                        weight: info.weight,
-                        calories: info.calories,
-                        carbs: info.carbs,
-                        protein: info.protein,
-                        fat: info.fat,
-                        avgShelfLife: info.avgShelfLife ?? 0,
-                        pieceWeight: info.pieceWeight ?? 0,
-                        expirationDate: (() => {
-                          const exp = new Date(f.addedDate);
-                          exp.setDate(exp.getDate() + (info.avgShelfLife ?? 0));
-                          return exp;
-                        })()
-                      }));
-                      setIngredientSearch("");
-                      setIngredientSuggestions([]);
-                    }}
-                    style={{ padding: "6px 8px", cursor: "pointer" }}
-                  >
-                    {name}
-                  </li>
-                ))}
+                {ingredientSuggestions.map(name => {
+        // 이제 Firestore에서 구독한 리스트에서 찾습니다
+        const info = ingredients.find(i => i.name === name)!;
+        return (
+          <li
+            key={name}
+            onClick={() => {
+              setIngredientForm(f => ({
+                ...f,
+                name,
+                weight:     info.weight,
+                calories:   info.calories,
+                carbs:      info.carbs,
+                protein:    info.protein,
+                fat:         info.fat,
+                avgShelfLife: info.avgShelfLife ?? 0,
+                pieceWeight:  info.pieceWeight ?? 0,
+                expirationDate: (() => {
+                  const exp = new Date(f.addedDate);
+                  exp.setDate(exp.getDate() + (info.avgShelfLife ?? 0));
+                  return exp;
+                })()
+              }));
+              setIngredientSearch(name);
+              setIngredientSuggestions([]);
+            }}
+            style={{ padding: "6px 8px", cursor: "pointer" }}
+          >
+            {name}
+          </li>
+        );
+      })}
               </ul>
             )}
           </label>
