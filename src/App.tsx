@@ -3,7 +3,8 @@ import "./App.css";
 import React, { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { db } from "./firebase";
-import { collection, onSnapshot, setDoc, doc } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, onSnapshot } from "firebase/firestore";
+
 
 
 interface Ingredient {
@@ -38,18 +39,24 @@ interface Recipe {
   instagram?: string
   ingredients: RecipeIngredient[]
   total: {
-    weight: number
-    calories: number
-    carbs: number
-    protein: number
-    fat: number
-  }
+    weight: number;
+    calories: number;
+    carbs: number;
+    protein: number;
+    fat: number;
+  };
 }
 
 
 function App() {
   // 복사용
 const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+
+// App.tsx 맨 위쪽, 컴포넌트 함수 안에
+function calculateIngredientForm(): number {
+  // ingredientForm.weight 만 반환하도록 단순화
+  return ingredientForm.weight;
+}
 
 // 레시피 모달—특정 재료 삭제
 const handleRemoveRecipeIngredient = (index: number) => {
@@ -62,7 +69,7 @@ const handleRemoveRecipeIngredient = (index: number) => {
   setRecipeUnitTypes(prev => prev.filter((_, i) => i !== index));
   setRecipeQuantities(prev => prev.filter((_, i) => i !== index));
 };
-const [ingredientSearch, setIngredientSearch]       = useState<string>("");
+const [ingredientSearch, setIngredientSearch] = useState<string>("");
 const [ingredientSuggestions, setIngredientSuggestions] = useState<string[]>([]);
 const [isDBAddModalOpen, setIsDBAddModalOpen] = useState<boolean>(false);
 const [isDBEditing, setIsDBEditing] = useState<boolean>(false);
@@ -99,6 +106,8 @@ const [recipeSearchTerm, setRecipeSearchTerm] = useState<string>("");
 const [recipeSuggestions, setRecipeSuggestions] = useState<string[]>([]);
 
 
+
+
 interface FridgeItem {
   id: string;
   name: string;
@@ -111,7 +120,11 @@ const [_fridgeItems, _setFridgeItems] = useState<FridgeItem[]>([]);
 // 편집 모드를 구분할 ID 상태
 const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
 
-
+function _calcTotal(
+  ings: { name: string; weight: number; calories: number; }[]
+): number {
+  return ings.reduce((sum, i) => sum + (i.calories * i.weight) / 100, 0);
+}
 
 // 상세보기 모달 열림 여부, 선택된 레시피 저장
 const [_isDetailModalOpen, _setIsDetailModalOpen] = useState(false);
@@ -122,31 +135,101 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   const [toast, setToast] = useState<string | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+
+  
+
+  
  
   useEffect(() => {
-    const col = collection(db, "recipes");
+    const col = collection(db, "ingredients");
     const unsubscribe = onSnapshot(col, snapshot => {
-      const arr: Recipe[] = [];
-      snapshot.forEach(doc => {
-        arr.push({ id: doc.id, ...doc.data() } as Recipe);
+      const items = snapshot.docs.map(doc => {
+        const data = doc.data() as {
+          name: string;
+          weight: number;
+          calories: number;
+          carbs: number;
+          protein: number;
+          fat: number;
+          avgShelfLife?: number;
+          pieceWeight?: number;
+        };
+        return { id: doc.id, ...data };
       });
-      setRecipes(arr);
+      
+  
+      const mapByName = items.reduce((acc, {
+        name,
+        weight,
+        calories,
+        carbs,
+        protein,
+        fat,
+        avgShelfLife,
+        pieceWeight
+      }) => {
+        if (!name) return acc;
+        acc[name] = { weight, calories, carbs, protein, fat, avgShelfLife, pieceWeight };
+        return acc;
+      }, {} as Record<string, {
+        weight: number;
+        calories: number;
+        carbs: number;
+        protein: number;
+        fat: number;
+        avgShelfLife?: number;
+        pieceWeight?: number;
+      }>);
+  
+      setIngredientDB(mapByName);
     });
+  
     return () => unsubscribe();
   }, []);
+  
   useEffect(() => {
-    recipes.forEach(r => {
-      setDoc(doc(db, "recipes", r.id), r);
+    const colRec = collection(db, "recipes");
+    const unsubRec = onSnapshot(colRec, snapshot => {
+      const recs: Recipe[] = snapshot.docs.map(doc => {
+        const data = doc.data() as Omit<Recipe, "total" | "id">;
+
+        // 영양성분 총합 계산
+        const total = data.ingredients.reduce((acc, i) => {
+          const _ratio = i.weight / (i.weight /* 원본 기준무게 */);
+          return {
+            weight:   acc.weight   + i.weight,
+            calories: acc.calories + (i.calories * i.weight) / 100,
+            carbs:    acc.carbs    + (i.carbs    * i.weight) / 100,
+            protein:  acc.protein  + (i.protein  * i.weight) / 100,
+            fat:      acc.fat      + (i.fat      * i.weight) / 100,
+          };
+        }, { weight: 0, calories: 0, carbs: 0, protein: 0, fat: 0 });
+      
+        return {
+          id: doc.id,
+          ...data,
+          total: {
+            weight:   Math.round(total.weight),
+            calories: Math.round(total.calories),
+            carbs:    Math.round(total.carbs),
+            protein:  Math.round(total.protein),
+            fat:      Math.round(total.fat),
+          },
+        };
+      });
+      setRecipes(recs);
     });
-  }, [recipes]);
+    return () => unsubRec();
+  }, []);
+  
+
     
 
   const [isIngredientModalOpen, setIsIngredientModalOpen] = useState(false);
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
   const [_expiryMode, _setExpiryMode] = useState("+3일");
   const [ingredientDB, setIngredientDB] = useState<{
-    [name: string]: Omit<Ingredient, "id" | "addedDate" | "expirationDate"> & { avgShelfLife?: number }
-  }>({});  
+    [name: string]: { weight: number; calories: number; carbs: number; protein: number; fat: number; avgShelfLife?: number; pieceWeight?: number } }>({});
   const [activeTab, setActiveTab] = useState<"list" | "db" | "fridge">("list");
   const handleSampleDownload = () => {
     const sampleData = [
@@ -180,7 +263,13 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
     setIsIngredientModalOpen(true);
   };
 
-  
+  useEffect(() => {
+    const names = Object.keys(ingredientDB);
+    const filtered = names.filter(name =>
+      name.toLowerCase().includes(ingredientSearch.toLowerCase())
+    );
+    setIngredientSuggestions(filtered);
+  }, [ingredientDB, ingredientSearch]);
   
 
 
@@ -200,19 +289,33 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   const [recipeForm, setRecipeForm] = useState({
     name: "",
-    description: "",      // 상세 설명 텍스트
-    image: "",            // 이미지 URL
-    youtube: "",          // YouTube 링크
-    instagram: "",        // Instagram 링크
-    ingredients: [] as { name: string; weight: number }[],
+    description: "",
+    image: "",
+    youtube: "",
+    instagram: "",
+    ingredients: [] as RecipeIngredient[],
   });
+
   
 
   const handleAddIngredientToRecipe = (name: string) => {
     if (!recipeForm.ingredients.find(i => i.name === name)) {
+      const { weight: defaultWeight, calories, carbs, protein, fat } = ingredientDB[name];
+
+      // ② setRecipeForm 에 반드시 모든 필드를 채운 객체를 넣어준다
       setRecipeForm(prev => ({
         ...prev,
-        ingredients: [...prev.ingredients, { name, weight: 0 }]
+        ingredients: [
+          ...prev.ingredients,
+          {
+            name,
+            weight: defaultWeight,
+            calories,
+            carbs,
+            protein,
+            fat
+          }
+        ]
       }));
       setRecipeUnitTypes(prev => [...prev, "g"]);
       setRecipeQuantities(prev => [...prev, 1]);
@@ -278,6 +381,64 @@ const handleDeleteRecipe = (id: string) => {
   setRecipes(prev => prev.filter(r => r.id !== id));
 };
 
+  // + handleRecipeSubmit 함수 정의 시작
+const handleRecipeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+
+  const payload = {
+    name:        recipeForm.name,
+    description: recipeForm.description,
+    image:       recipeForm.image,
+    youtube:     recipeForm.youtube,
+    instagram:   recipeForm.instagram,
+    ingredients: recipeForm.ingredients,
+    total:       calculateRecipeTotal(),  // ← 객체 반환!
+  };
+  
+
+  try {
+    if (editingRecipeId) {
+      // 수정 모드
+      await updateDoc(doc(db, "recipes", editingRecipeId), payload);
+    } else {
+      // 신규 등록 모드
+      const colRef = collection(db, "recipes");
+      const _unsubscribe = onSnapshot(colRef, snapshot => {
+        const recs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Recipe[];
+        setRecipes(recs);
+      });
+      const docRef = await addDoc(colRef, payload);
+      // 로컬 state에도 반영
+      setRecipes(prev => [
+        ...prev,
+        { id: docRef.id, ...payload }
+      ]);
+    }
+  } catch (err) {
+    console.error("레시피 저장 중 오류:", err);
+  }
+
+  // 모달 닫고, 폼 초기화
+  setIsRecipeModalOpen(false);
+  setEditingRecipeId(null);
+  setRecipeForm({
+    name: "",
+    description: "",
+    image: "",
+    youtube: "",
+    instagram: "",
+    ingredients: []
+  });
+  setRecipeUnitTypes([]);
+  setRecipeQuantities([]);
+};
+// - handleRecipeSubmit 함수 정의 끝
+
+
+
 // 레시피 수정 모드로 전환
 const handleEditRecipe = (r: Recipe) => {
   setRecipeForm({
@@ -286,9 +447,19 @@ const handleEditRecipe = (r: Recipe) => {
     image:       r.image || "",
     youtube:     r.youtube || "",
     instagram:   r.instagram || "",
-    ingredients: r.ingredients.map(i => ({ name: i.name, weight: i.weight })),
-  });
+    ingredients: r.ingredients.map(i => {
+      const dbItem = ingredientDB[i.name] || { calories: 0, carbs: 0, protein: 0, fat: 0 };
+      return {
+        name: i.name,
+        weight: i.weight,
+        calories: dbItem.calories,
+        carbs:    dbItem.carbs,
+        protein:  dbItem.protein,
+        fat:      dbItem.fat
+      };
+  }),
   // 단위·수량 배열도 원래 값으로 채워두면 좋습니다
+});
   setRecipeUnitTypes(r.ingredients.map(_ => "g"));
   setRecipeQuantities(r.ingredients.map(_ => 1));
   setEditingRecipeId(r.id);
@@ -480,10 +651,19 @@ const handleEditRecipe = (r: Recipe) => {
     
     
   };
-  const saveToDB = (name: string, data: Omit<Ingredient, "id" | "addedDate" | "expirationDate"> & Partial<Pick<Ingredient, "avgShelfLife" | "pieceWeight">>) => {
-    const updated = { ...ingredientDB, [name]: data };
-    setIngredientDB(updated);
-    localStorage.setItem("ingredientDB", JSON.stringify(updated));
+  const saveToDB = (_name: string, _data: Omit<Ingredient, "id" | "addedDate" | "expirationDate"> & Partial<Pick<Ingredient, "avgShelfLife" | "pieceWeight">>) => {
+    
+    addDoc(collection(db, "ingredients"), {
+      name:         ingredientForm.name,
+      weight:       ingredientForm.weight,
+      calories:     ingredientForm.calories,
+      carbs:        ingredientForm.carbs,
+      protein:      ingredientForm.protein,
+      fat:          ingredientForm.fat,
+      avgShelfLife: ingredientForm.avgShelfLife ?? 0,
+      pieceWeight:  ingredientForm.pieceWeight  ?? 0,
+      });
+      
   };
 
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -528,7 +708,6 @@ const handleEditRecipe = (r: Recipe) => {
         if (!name || !weight) continue;
       
         newDB[name] = {
-          name,
           weight,
           calories,
           carbs,
@@ -539,12 +718,11 @@ const handleEditRecipe = (r: Recipe) => {
         };
       }
       
-      // (이후 setIngredientDB(newDB) 등 기존 로직 유지)
       
   
       const merged = { ...ingredientDB, ...newDB };
       setIngredientDB(merged);
-      localStorage.setItem("ingredientDB", JSON.stringify(merged));
+      
     };
   
     reader.readAsBinaryString(file);
@@ -1007,7 +1185,7 @@ setIngredientSuggestions([]);
 
 
       {isRecipeModalOpen && (
-        <div style={{
+        <form onSubmit={handleRecipeSubmit} style={{
           position: "fixed",
           top: 0,
           left: 0,
@@ -1254,7 +1432,7 @@ setIngredientSuggestions([]);
 
 
           <div style={{ marginTop: 12 }}>
-            <strong>합계:</strong> {calculateRecipeTotal().weight}g / {calculateRecipeTotal().calories}kcal |
+            <strong>합계:</strong> {calculateIngredientForm()}g / {calculateRecipeTotal().calories}kcal |
             탄: {calculateRecipeTotal().carbs}g / 단: {calculateRecipeTotal().protein}g / 지: {calculateRecipeTotal().fat}g
           </div>
 
@@ -1285,7 +1463,7 @@ setIsRecipeModalOpen(false)
 </button>
 
         </div>
-      </div>
+      </form>
       )}
       
 {selectedRecipe && (
@@ -1355,178 +1533,107 @@ setIsRecipeModalOpen(false)
   </div>
 )}
 
+  {/* 3) 냉장고에 재료 넣기 모달 */}
+  {isIngredientModalOpen && (
+    <div style={{
+      position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+      backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center"
+    }}>
+      <div style={{ background: "#2c2c2c", color: "white", padding: 20, borderRadius: 8, width: 500 }}>
+        <h2>냉장고에 재료 넣기</h2>
+        <form onSubmit={handleAddIngredient}>
 
+          {/* 재료 검색 */}
+          <label style={{ display: "flex", flexDirection: "column", marginBottom: 12, position: "relative" }}>
+            재료 검색
+            <input
+              type="text"
+              value={ingredientSearch}
+              onChange={e => {
+                const term = e.target.value;
+                setIngredientSearch(term);
+                setIngredientSuggestions(
+                  Object.keys(ingredientDB).filter(name =>
+                    name.toLowerCase().includes(term.toLowerCase())
+                  )
+                );
+              }}
+              placeholder="예) 양파, 두부…"
+              style={{ padding: "8px", borderRadius: 4, border: "1px solid #555" }}
+            />
+            {ingredientSuggestions.length > 0 && (
+              <ul style={{
+                position: "absolute", top: "100%", left: 0, right: 0, maxHeight: 150, overflowY: "auto",
+                background: "#2c2c2c", border: "1px solid #555", borderRadius: "0 0 4px 4px",
+                margin: 0, padding: 0, listStyle: "none", zIndex: 10
+              }}>
+                {ingredientSuggestions.map(name => (
+                  <li
+                    key={name}
+                    onClick={() => {
+                      const info = ingredientDB[name]!;
+                      setIngredientForm(f => ({
+                        ...f,
+                        name,
+                        weight: info.weight,
+                        calories: info.calories,
+                        carbs: info.carbs,
+                        protein: info.protein,
+                        fat: info.fat,
+                        avgShelfLife: info.avgShelfLife ?? 0,
+                        pieceWeight: info.pieceWeight ?? 0,
+                        expirationDate: (() => {
+                          const exp = new Date(f.addedDate);
+                          exp.setDate(exp.getDate() + (info.avgShelfLife ?? 0));
+                          return exp;
+                        })()
+                      }));
+                      setIngredientSearch("");
+                      setIngredientSuggestions([]);
+                    }}
+                    style={{ padding: "6px 8px", cursor: "pointer" }}
+                  >
+                    {name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </label>
 
+          {/* 등록일 */}
+          <label style={{ display: "flex", flexDirection: "column", marginBottom: 12 }}>
+            등록일
+            <input
+              type="date"
+              value={format(ingredientForm.addedDate, "yyyy-MM-dd")}
+              onChange={e => setIngredientForm({ ...ingredientForm, addedDate: new Date(e.target.value) })}
+              style={{ width: "200px" }}
+            />
+          </label>
 
+          {/* 무게 */}
+          <label style={{ display: "flex", flexDirection: "column", marginBottom: 12 }}>
+            무게 (g)
+            <input
+              type="number"
+              value={ingredientForm.weight}
+              onChange={e => setIngredientForm({ ...ingredientForm, weight: Number(e.target.value) })}
+            />
+          </label>
 
-      {isIngredientModalOpen && (
-  <div style={{
-    position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
-    backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center"
-  }}>
-    <div style={{ background: "#fff", padding: 20, borderRadius: 8, width: 500 }}>
-      <h2>냉장고에 재료 넣기</h2>
-      <form onSubmit={handleAddIngredient}>
+          <div style={{ marginTop: 12 }}>
+          <strong>합계:</strong> {calculateIngredientForm()}g
+          </div>
 
-      {/* 이름 */}
-      <label
-  style={{
-    display: "flex",
-    flexDirection: "column",
-    marginBottom: 12,
-    position: "relative"
-  }}
->
-  재료 검색
-  <input
-    type="text"
-    value={ingredientSearch}
-    onChange={e => {
-      const term = e.target.value;
-      setIngredientSearch(term);
-      setIngredientSuggestions(
-        Object.keys(ingredientDB).filter(name =>
-          name.toLowerCase().includes(term.toLowerCase())
-        )
-      );
-    }}
-    placeholder="예) 양파, 두부…"
-    style={{
-      padding: "8px",
-      borderRadius: 4,
-      border: "1px solid #555"
-    }}
-  />
-  {ingredientSuggestions.length > 0 && (
-    <ul
-      style={{
-        position: "absolute",
-        top: "100%",
-        left: 0,
-        right: 0,
-        maxHeight: 150,
-        overflowY: "auto",
-        background: "#2c2c2c",
-        border: "1px solid #555",
-        borderRadius: "0 0 4px 4px",
-        margin: 0,
-        padding: 0,
-        listStyle: "none",
-        zIndex: 10
-      }}
-    >
-      {ingredientSuggestions.map(name => (
-       <li
-       key={name}
-       onClick={() => {
-         const info = ingredientDB[name]!;
-         setIngredientForm(f => {
-           // 1) 기본 폼 복제  
-           const updated = {
-             ...f,
-             name,
-             weight:      info.weight,
-             calories:    info.calories,
-             carbs:       info.carbs,
-             protein:     info.protein,
-             fat:         info.fat,
-             avgShelfLife: info.avgShelfLife ?? 0,
-             pieceWeight:  info.pieceWeight  ?? 0,
-           };
-           // 2) 등록일 기준으로 avgShelfLife일만큼 더한 만료일 계산
-           const exp = new Date(f.addedDate);
-           exp.setDate(exp.getDate() + (info.avgShelfLife ?? 0));
-           updated.expirationDate = exp;
-           return updated;
-         });
-         setIngredientSearch(name);
-         setIngredientSuggestions([]);
-       }}
-       style={{ padding: "6px 8px", cursor: "pointer" }}
-     >
-       {name}
-     </li>
-     
-      
-      ))}
-    </ul>
-  )}
-</label>
-
-
-
-<label style={{ display: "flex", flexDirection: "column", marginBottom: 12 }}>
-  등록일
-  <input
-    type="date"
-    value={format(ingredientForm.addedDate, "yyyy-MM-dd")}
-    onChange={(e) =>
-      setIngredientForm({ ...ingredientForm, addedDate: new Date(e.target.value) })
-    }
-    style={{ width: "200px" }}
-  />
-</label>
-
-<label style={{ display: "flex", flexDirection: "column", marginBottom: 12 }}>
-  유통기한
-  <input
-    type="date"
-    value={format(ingredientForm.expirationDate, "yyyy-MM-dd")}
-    onChange={e =>
-      setIngredientForm({
-        ...ingredientForm,
-        expirationDate: new Date(e.target.value)
-      })
-    }
-    style={{ width: "200px", marginTop: "4px" }}
-  />
-</label>
-
-
-
-{/* 무게 + 칼로리 */}
-{/* — 무게 or 개수 입력 + 단위 선택 라디오 */}
-<label style={{ display: "flex", flexDirection: "column", marginBottom: 12 }}>
-  무게 (g)
-  <input
-    type="number"
-    value={ingredientForm.weight || ""}
-    onChange={e =>
-      setIngredientForm({ ...ingredientForm, weight: Number(e.target.value) })
-    }
-  />
-</label>
-
-
-<button type="submit">등록</button>
-<button
-  type="button"
-  onClick={() => {
-    setIsIngredientModalOpen(false);
-    setIngredientForm({
-      name: "",
-      addedDate: new Date(),
-      expirationDate: new Date(),
-      weight: 0,
-      calories: 0,
-      carbs: 0,
-      protein: 0,
-      fat: 0,
-      avgShelfLife: 0,
-      pieceWeight: 0
-    });
-    setIngredientSuggestions([]);
-    _setExpiryMode("+3일");
-  }}
->
-  취소
-</button>
-
-</form>
-
+          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+            <button type="submit">추가</button>
+            <button type="button" onClick={() => setIsIngredientModalOpen(false)}>취소</button>
+          </div>
+        </form>
+      </div>
     </div>
-  </div>
-)}
+  )}
+
 </>);
 }
 
