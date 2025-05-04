@@ -120,11 +120,6 @@ const [_fridgeItems, _setFridgeItems] = useState<FridgeItem[]>([]);
 // 편집 모드를 구분할 ID 상태
 const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
 
-function _calcTotal(
-  ings: { name: string; weight: number; calories: number; }[]
-): number {
-  return ings.reduce((sum, i) => sum + (i.calories * i.weight) / 100, 0);
-}
 
 // 상세보기 모달 열림 여부, 선택된 레시피 저장
 const [_isDetailModalOpen, _setIsDetailModalOpen] = useState(false);
@@ -195,7 +190,7 @@ const [recipes, setRecipes] = useState<Recipe[]>([]);
 
         // 영양성분 총합 계산
         const total = data.ingredients.reduce((acc, i) => {
-          const _ratio = i.weight / (i.weight /* 원본 기준무게 */);
+          
           return {
             weight:   acc.weight   + i.weight,
             calories: acc.calories + (i.calories * i.weight) / 100,
@@ -403,7 +398,7 @@ const handleRecipeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     } else {
       // 신규 등록 모드
       const colRef = collection(db, "recipes");
-      const _unsubscribe = onSnapshot(colRef, snapshot => {
+      onSnapshot(colRef, snapshot => {
         const recs = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
